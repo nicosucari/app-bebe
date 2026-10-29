@@ -21,6 +21,8 @@
     corazon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
     mas: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
     atras: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    lupa: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+    cerrar: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
     flecha: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     ajustes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>'
   };
@@ -41,7 +43,8 @@
     previa: '#lista',
     ultimo: { categoria: '', urgencia: URGENCIAS[0], responsable: '' },
     mantitaAnimada: false,
-    error: ''
+    error: '',
+    busqueda: ''
   };
 
   let cacheOpciones = null;
@@ -463,6 +466,12 @@
 
     document.body.classList.remove('sin-sesion');
     const r = ruta();
+    const buscador = $('#buscador');
+    if (r.vista === 'lista' && buscador && document.activeElement === buscador) {
+      actualizarContenidoLista();
+      pintarSync();
+      return;
+    }
     const scrolls = guardarScrolls();
     const y = window.scrollY;
     let html;
@@ -701,42 +710,82 @@
     guardarLS(LS.colapsados, JSON.stringify(datos));
   }
 
-  // Grupos que se muestran con el modo y el filtro actuales: [nombre, todos sus ítems, ítems visibles]
+  function sinAcentos(v) {
+    return String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  }
+
+  function terminosBusqueda() {
+    return sinAcentos(app.busqueda).split(/\s+/).filter(Boolean);
+  }
+
+  // Busca en el nombre, la categoría, las notas y en los modelos y tiendas de sus opciones
+  function coincide(it, terminos) {
+    const partes = [it.nombre, it.categoria, it.urgencia, it.notas];
+    opcionesDe(it.id).forEach(function (o) { partes.push(o.nombre, o.tienda); });
+    const textoItem = sinAcentos(partes.join(' '));
+    return terminos.every(function (t) { return textoItem.indexOf(t) !== -1; });
+  }
+
+  // Grupos que se muestran: [nombre, todos sus ítems, ítems visibles]
   function gruposLista() {
     const modo = modoLista();
     const filtro = filtroLista();
-    const pasa = function (it) {
-      const e = estadoItem(it);
-      if (filtro === 'todo') return true;
-      return filtro === 'conseguidos' ? e === 'conseguido' : e !== 'conseguido';
-    };
+    const terminos = terminosBusqueda();
+    const pasa = terminos.length
+      ? function (it) { return coincide(it, terminos); }
+      : function (it) {
+          const e = estadoItem(it);
+          if (filtro === 'todo') return true;
+          return filtro === 'conseguidos' ? e === 'conseguido' : e !== 'conseguido';
+        };
     return agrupar(itemsActivos(), modo).map(function (par) {
       return [par[0], par[1], par[1].filter(pasa).sort(ordenarFilas)];
     }).filter(function (g) { return g[2].length; });
   }
 
   function vistaLista() {
+    return '<header class="cabecera"><h1>Lista</h1></header>' +
+      '<div class="buscador" role="search">' + ICONOS.lupa +
+        '<input id="buscador" type="search" value="' + esc(app.busqueda) + '" placeholder="Buscar en la lista" aria-label="Buscar en la lista" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">' +
+        '<button class="limpiar" type="button" data-accion="limpiar-busqueda" aria-label="Borrar búsqueda"' + (app.busqueda ? '' : ' hidden') + '>' + ICONOS.cerrar + '</button>' +
+      '</div>' +
+      '<div id="lista-contenido">' + contenidoLista() + '</div>' +
+      '<button class="fab" type="button" data-accion="nuevo-item">' + ICONOS.mas + '<span>Agregar</span></button>';
+  }
+
+  function contenidoLista() {
     const modo = modoLista();
     const filtro = filtroLista();
     const activos = itemsActivos();
     const grupos = gruposLista();
+    const buscando = terminosBusqueda().length > 0;
     const colapsados = leerColapsados(modo);
     const todosColapsados = grupos.length > 0 && grupos.every(function (g) { return colapsados.indexOf(g[0]) !== -1; });
 
     let cuerpo = '';
     grupos.forEach(function (g) {
       const nombre = g[0];
-      const abierto = colapsados.indexOf(nombre) === -1;
+      const abierto = buscando || colapsados.indexOf(nombre) === -1;
       const pc = progreso(g[1]);
       const punto = modo === 'categoria' ? '<i class="punto" style="--c:' + colorCat(nombre) + '"></i>' : '';
-      cuerpo += '<section class="grupo' + (abierto ? '' : ' colapsado') + '">' +
-        '<h2 class="grupo-cabecera"><button class="grupo-toggle" type="button" data-accion="colapsar" data-grupo="' + esc(nombre) + '" aria-expanded="' + abierto + '">' +
-          '<span class="flecha">' + ICONOS.flecha + '</span>' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span>' +
-          '<span class="conteo">' + pc.tengo + ' de ' + pc.total + '</span>' +
-        '</button></h2>' +
+      const cabecera = buscando
+        ? '<span class="grupo-toggle estatico">' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span></span>'
+        : '<button class="grupo-toggle" type="button" data-accion="colapsar" data-grupo="' + esc(nombre) + '" aria-expanded="' + abierto + '">' +
+            '<span class="flecha">' + ICONOS.flecha + '</span>' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span>' +
+            '<span class="conteo">' + pc.tengo + ' de ' + pc.total + '</span></button>';
+      cuerpo += '<section class="grupo' + (abierto ? '' : ' colapsado') + '"><h2 class="grupo-cabecera">' + cabecera + '</h2>' +
         (abierto ? '<ul class="lista">' + g[2].map(function (it) { return filaItem(it, modo === 'urgencia'); }).join('') + '</ul>' : '') +
       '</section>';
     });
+
+    if (buscando) {
+      const n = grupos.reduce(function (t, g) { return t + g[2].length; }, 0);
+      const resumen = n
+        ? '<p class="resultados">' + n + ' ' + plural(n, 'resultado', 'resultados') + '</p>'
+        : '<p class="resultados">No encontramos nada con “' + esc(app.busqueda.trim()) + '”.</p>' +
+          '<button class="btn secundario" type="button" data-accion="nuevo-item" data-nombre="' + esc(app.busqueda.trim()) + '">Agregar “' + esc(app.busqueda.trim()) + '”</button>';
+      return resumen + cuerpo;
+    }
 
     if (!activos.length) {
       cuerpo = '<div class="vacio"><p>La lista está vacía. Agreguen lo primero que se les ocurra; después se ordena solo.</p></div>';
@@ -750,12 +799,18 @@
       ? '<div class="lista-acciones"><button class="btn texto" type="button" data-accion="colapsar-todo">' + (todosColapsados ? 'Expandir todo' : 'Contraer todo') + '</button></div>'
       : '';
 
-    return '<header class="cabecera"><h1>Lista</h1></header>' +
-      '<div class="controles">' +
+    return '<div class="controles">' +
         segmentado('modo', [['categoria', 'Por categoría'], ['urgencia', 'Por urgencia']], modo) +
         segmentado('filtro', [['falta', 'Falta'], ['conseguidos', 'Conseguido'], ['todo', 'Todo']], filtro) +
-      '</div>' + contraer + cuerpo +
-      '<button class="fab" type="button" data-accion="nuevo-item">' + ICONOS.mas + '<span>Agregar</span></button>';
+      '</div>' + contraer + cuerpo;
+  }
+
+  function actualizarContenidoLista() {
+    const contenedor = $('#lista-contenido');
+    if (!contenedor) return;
+    contenedor.innerHTML = contenidoLista();
+    const limpiar = $('.buscador .limpiar');
+    if (limpiar) limpiar.hidden = !app.busqueda;
   }
 
   function alternarGrupo(nombre) {
@@ -1383,7 +1438,17 @@
     const id = el.dataset.id;
     switch (accion) {
       case 'cerrar-hoja': cerrarHoja(); break;
-      case 'nuevo-item': abrirHojaItem(null); break;
+      case 'nuevo-item':
+        abrirHojaItem(null);
+        if (el.dataset.nombre) { const campoNombre = $('#capa input[name="nombre"]'); if (campoNombre) campoNombre.value = el.dataset.nombre; }
+        break;
+      case 'limpiar-busqueda': {
+        app.busqueda = '';
+        const campo = $('#buscador');
+        if (campo) { campo.value = ''; campo.focus(); }
+        actualizarContenidoLista();
+        break;
+      }
       case 'editar-item': abrirHojaItem(buscarItem(id)); break;
       case 'borrar-item': borrarItem(id); break;
       case 'alternar': alternarConseguido(id); break;
@@ -1448,6 +1513,11 @@
 
   function alEscribir(e) {
     const t = e.target;
+    if (t.id === 'buscador') {
+      app.busqueda = t.value;
+      actualizarContenidoLista();
+      return;
+    }
     if (t.name === 'categoria_nueva' && t.value) {
       t.closest('form').querySelectorAll('[name="categoria"]').forEach(function (r) { r.checked = false; });
     }
@@ -1458,7 +1528,10 @@
     document.addEventListener('submit', alEnviar);
     document.addEventListener('change', alCambiar);
     document.addEventListener('input', alEscribir);
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarHoja(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') cerrarHoja();
+      if (e.key === 'Enter' && e.target.id === 'buscador') e.target.blur();
+    });
     window.addEventListener('hashchange', alCambiarRuta);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) refrescar(); });
     window.addEventListener('online', function () { procesarCola(); refrescar(); });
