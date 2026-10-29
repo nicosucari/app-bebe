@@ -365,6 +365,48 @@ code { background: var(--superficie); padding: 1px 6px; border-radius: 6px; font
 
 .grupo-archivo { margin-bottom: 18px; }
 
+/* Grupos colapsables de la lista */
+.grupo.colapsado { margin-top: 6px; }
+
+.grupo-cabecera { margin: 0 0 6px; font-size: 1rem; }
+
+.grupo-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.grupo.colapsado .grupo-toggle { background: var(--superficie); padding: 10px 12px; }
+
+.grupo-toggle .flecha {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  color: var(--tinta-suave);
+  transition: transform .2s;
+}
+
+.grupo-toggle .flecha svg { width: 18px; height: 18px; }
+.grupo-toggle[aria-expanded="false"] .flecha { transform: rotate(-90deg); }
+.grupo-nombre { min-width: 0; overflow-wrap: anywhere; }
+.grupo-toggle .conteo { margin-left: auto; padding-left: 12px; color: var(--tinta-suave); font-size: .88rem; font-weight: 600; white-space: nowrap; }
+
+.lista-acciones { display: flex; justify-content: flex-end; margin: 6px 0 -12px; }
+
 /* ───────────── Controles ───────────── */
 
 .controles { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 4px; }

@@ -14,13 +14,14 @@
   const ORDEN_FILA = { pendiente: 0, comparando: 1, elegido: 2, conseguido: 3, no_necesario: 4 };
   const ORDEN_MANTITA = { conseguido: 0, elegido: 1, comparando: 2, pendiente: 3 };
   const ORDEN_PROXIMO = { pendiente: 0, comparando: 1, elegido: 2 };
-  const LS = { pin: 'bebe.pin', yo: 'bebe.yo', modo: 'bebe.lista.modo', filtro: 'bebe.lista.filtro' };
+  const LS = { pin: 'bebe.pin', yo: 'bebe.yo', modo: 'bebe.lista.modo', filtro: 'bebe.lista.filtro', colapsados: 'bebe.lista.colapsados' };
 
   const ICONOS = {
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     corazon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
     mas: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
     atras: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    flecha: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     ajustes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>'
   };
 
@@ -678,25 +679,63 @@
 
   /* ───────────── Lista ───────────── */
 
-  function vistaLista() {
-    const modo = leerLS(LS.modo) === 'urgencia' ? 'urgencia' : 'categoria';
+  function modoLista() { return leerLS(LS.modo) === 'urgencia' ? 'urgencia' : 'categoria'; }
+
+  function filtroLista() {
     const guardado = leerLS(LS.filtro);
-    const filtro = ['falta', 'conseguidos', 'todo'].indexOf(guardado) !== -1 ? guardado : 'falta';
-    const activos = itemsActivos();
+    return ['falta', 'conseguidos', 'todo'].indexOf(guardado) !== -1 ? guardado : 'falta';
+  }
+
+  // Los grupos colapsados se recuerdan en cada celular, por separado para "Por categoría" y "Por urgencia"
+  function leerColapsados(modo) {
+    try {
+      const datos = JSON.parse(leerLS(LS.colapsados) || '{}');
+      return Array.isArray(datos[modo]) ? datos[modo] : [];
+    } catch (e) { return []; }
+  }
+
+  function guardarColapsados(modo, lista) {
+    let datos = {};
+    try { datos = JSON.parse(leerLS(LS.colapsados) || '{}') || {}; } catch (e) { datos = {}; }
+    datos[modo] = lista;
+    guardarLS(LS.colapsados, JSON.stringify(datos));
+  }
+
+  // Grupos que se muestran con el modo y el filtro actuales: [nombre, todos sus ítems, ítems visibles]
+  function gruposLista() {
+    const modo = modoLista();
+    const filtro = filtroLista();
     const pasa = function (it) {
       const e = estadoItem(it);
       if (filtro === 'todo') return true;
       return filtro === 'conseguidos' ? e === 'conseguido' : e !== 'conseguido';
     };
+    return agrupar(itemsActivos(), modo).map(function (par) {
+      return [par[0], par[1], par[1].filter(pasa).sort(ordenarFilas)];
+    }).filter(function (g) { return g[2].length; });
+  }
+
+  function vistaLista() {
+    const modo = modoLista();
+    const filtro = filtroLista();
+    const activos = itemsActivos();
+    const grupos = gruposLista();
+    const colapsados = leerColapsados(modo);
+    const todosColapsados = grupos.length > 0 && grupos.every(function (g) { return colapsados.indexOf(g[0]) !== -1; });
 
     let cuerpo = '';
-    agrupar(activos, modo).forEach(function (par) {
-      const visibles = par[1].filter(pasa).sort(ordenarFilas);
-      if (!visibles.length) return;
-      const pc = progreso(par[1]);
-      const punto = modo === 'categoria' ? '<i class="punto" style="--c:' + colorCat(par[0]) + '"></i>' : '';
-      cuerpo += '<section class="grupo"><h2 class="grupo-titulo">' + punto + esc(par[0]) + '<span>' + pc.tengo + ' de ' + pc.total + '</span></h2>' +
-        '<ul class="lista">' + visibles.map(function (it) { return filaItem(it, modo === 'urgencia'); }).join('') + '</ul></section>';
+    grupos.forEach(function (g) {
+      const nombre = g[0];
+      const abierto = colapsados.indexOf(nombre) === -1;
+      const pc = progreso(g[1]);
+      const punto = modo === 'categoria' ? '<i class="punto" style="--c:' + colorCat(nombre) + '"></i>' : '';
+      cuerpo += '<section class="grupo' + (abierto ? '' : ' colapsado') + '">' +
+        '<h2 class="grupo-cabecera"><button class="grupo-toggle" type="button" data-accion="colapsar" data-grupo="' + esc(nombre) + '" aria-expanded="' + abierto + '">' +
+          '<span class="flecha">' + ICONOS.flecha + '</span>' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span>' +
+          '<span class="conteo">' + pc.tengo + ' de ' + pc.total + '</span>' +
+        '</button></h2>' +
+        (abierto ? '<ul class="lista">' + g[2].map(function (it) { return filaItem(it, modo === 'urgencia'); }).join('') + '</ul>' : '') +
+      '</section>';
     });
 
     if (!activos.length) {
@@ -707,12 +746,34 @@
         : '<p class="nota">Todavía no conseguimos nada de la lista.</p>';
     }
 
+    const contraer = grupos.length > 1
+      ? '<div class="lista-acciones"><button class="btn texto" type="button" data-accion="colapsar-todo">' + (todosColapsados ? 'Expandir todo' : 'Contraer todo') + '</button></div>'
+      : '';
+
     return '<header class="cabecera"><h1>Lista</h1></header>' +
       '<div class="controles">' +
         segmentado('modo', [['categoria', 'Por categoría'], ['urgencia', 'Por urgencia']], modo) +
         segmentado('filtro', [['falta', 'Falta'], ['conseguidos', 'Conseguido'], ['todo', 'Todo']], filtro) +
-      '</div>' + cuerpo +
+      '</div>' + contraer + cuerpo +
       '<button class="fab" type="button" data-accion="nuevo-item">' + ICONOS.mas + '<span>Agregar</span></button>';
+  }
+
+  function alternarGrupo(nombre) {
+    const modo = modoLista();
+    const colapsados = leerColapsados(modo);
+    const i = colapsados.indexOf(nombre);
+    if (i === -1) colapsados.push(nombre); else colapsados.splice(i, 1);
+    guardarColapsados(modo, colapsados);
+    render();
+  }
+
+  function alternarTodos() {
+    const modo = modoLista();
+    const nombres = gruposLista().map(function (g) { return g[0]; });
+    const colapsados = leerColapsados(modo);
+    const todos = nombres.every(function (n) { return colapsados.indexOf(n) !== -1; });
+    guardarColapsados(modo, todos ? [] : nombres);
+    render();
   }
 
   /* ───────────── Detalle del ítem y comparador ───────────── */
@@ -1338,6 +1399,8 @@
       case 'recomparar': volverAComparar(id); break;
       case 'recuperar': cambiar([g('Opciones', { id: id, estado: 'activa' })]); toast('Volvió al comparador'); break;
       case 'fav': alternarFav(id); break;
+      case 'colapsar': alternarGrupo(el.dataset.grupo); break;
+      case 'colapsar-todo': alternarTodos(); break;
       case 'modo': guardarLS(LS.modo, el.dataset.valor); render(); break;
       case 'filtro': guardarLS(LS.filtro, el.dataset.valor); render(); break;
       case 'ajustes': abrirAjustes(); break;
