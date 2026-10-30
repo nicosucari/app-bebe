@@ -17,6 +17,10 @@
   --comprometido: #86B9AF;
   --falta: #C9DDD6;
   --sombra: 0 10px 30px rgba(20, 45, 45, .14);
+  --regalo: #9A5A8E;
+  --regalo-texto: #FFFFFF;
+  --repetido: #F6E7BC;
+  --repetido-texto: #6E5312;
   --radio-chico: 6px;
   --radio: 16px;
   --radio-grande: 22px;
@@ -42,6 +46,10 @@
     --comprometido: #4E8C82;
     --falta: #33504F;
     --sombra: 0 10px 30px rgba(0, 0, 0, .4);
+    --regalo: #D9A2CE;
+    --regalo-texto: #1A2C2F;
+    --repetido: #4A3F22;
+    --repetido-texto: #F1D893;
     color-scheme: dark;
   }
 }
@@ -1099,6 +1107,175 @@ body.sin-sesion #toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); 
 .ingreso-marca { display: grid; grid-template-columns: repeat(4, 34px); gap: 6px; margin-bottom: 8px; }
 
 .quien { display: flex; flex-direction: column; gap: 10px; }
+
+/* ───────────── Dónde se compra, regalos y repetidos ───────────── */
+
+.oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.btn.chico.activo { background: var(--acento); color: var(--acento-texto); }
+
+.aviso.suave { margin-top: 12px; background: var(--superficie); }
+
+.filtros {
+  display: flex;
+  gap: 6px;
+  margin: 2px -20px 0;
+  padding: 2px 20px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filtros::-webkit-scrollbar { display: none; }
+
+.filtros button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 6px 13px;
+  border: 1.5px solid var(--linea);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tinta-suave);
+  font-size: .9rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filtros .n { font-weight: 600; font-variant-numeric: tabular-nums; opacity: .75; }
+.filtros button[aria-pressed="true"] { border-color: var(--acento); background: var(--acento); color: var(--acento-texto); }
+.filtros button[aria-pressed="true"] .n { opacity: .85; }
+
+.explicacion { margin: 14px 4px 0; }
+
+.marca-repetido {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--repetido);
+  color: var(--repetido-texto);
+  font-size: .75rem;
+  font-weight: 800;
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+
+.marca-regalo { color: var(--regalo); }
+.marca-regalo svg { width: 17px; height: 17px; vertical-align: -3px; }
+
+/* Botones de clasificar en cada fila */
+.fila.clasificando { flex-wrap: wrap; padding-left: 8px; }
+.fila.clasificando .fila-cuerpo { padding-bottom: 4px; }
+
+.clasif {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 8px 4px;
+}
+
+.lugares {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--fondo);
+}
+
+.lugares button {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tinta-suave);
+  font-size: .8rem;
+  font-weight: 700;
+  line-height: 1.15;
+  cursor: pointer;
+}
+
+.lugares button[aria-pressed="true"] { background: var(--acento); color: var(--acento-texto); }
+
+.boton-regalo {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1.5px solid var(--linea);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tinta-suave);
+  cursor: pointer;
+}
+
+.boton-regalo svg { width: 21px; height: 21px; }
+.boton-regalo[aria-pressed="true"] { border-color: var(--regalo); background: var(--regalo); color: var(--regalo-texto); }
+
+/* En el detalle del ítem */
+.compra { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.compra .etiqueta { margin: 0; }
+.compra .lugares { flex: none; background: var(--superficie); }
+.compra .lugares button { min-height: 42px; font-size: .9rem; }
+
+.repetido {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: var(--radio);
+  background: var(--repetido);
+}
+
+.repetido h2 { margin-bottom: 4px; color: var(--repetido-texto); }
+.repetido .nota { color: var(--tinta); }
+.repetido .lista { margin: 8px 0 12px; }
+
+.panel-regalos {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: var(--radio);
+  background: var(--superficie);
+}
+
+.panel-regalos p { margin: 0; font-weight: 700; }
+
+.quien-regala { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.quien-regala p { margin: 0; }
+.quien-regala strong { color: var(--regalo); }
+
+.sugerencias { display: flex; flex-wrap: wrap; gap: 8px; margin-top: -6px; }
+
+.chip-boton {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1.5px solid var(--linea);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tinta);
+  font-size: .9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
 
 /* ───────────── Movimiento reducido ───────────── */
 

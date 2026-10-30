@@ -14,7 +14,10 @@
   const ORDEN_FILA = { pendiente: 0, comparando: 1, elegido: 2, conseguido: 3, no_necesario: 4 };
   const ORDEN_MANTITA = { conseguido: 0, elegido: 1, comparando: 2, pendiente: 3 };
   const ORDEN_PROXIMO = { pendiente: 0, comparando: 1, elegido: 2 };
-  const LS = { pin: 'bebe.pin', yo: 'bebe.yo', modo: 'bebe.lista.modo', filtro: 'bebe.lista.filtro', colapsados: 'bebe.lista.colapsados' };
+  const LS = { pin: 'bebe.pin', yo: 'bebe.yo', modo: 'bebe.lista.modo', filtro: 'bebe.lista.filtro', donde: 'bebe.lista.donde', colapsados: 'bebe.lista.colapsados' };
+  // [valor que se guarda en la planilla, nombre para mostrar, nombre corto para los botones]
+  const LUGARES = [['Argentina', 'Argentina', 'Argentina'], ['EEUU online', 'EE.UU. online', 'EE.UU. online'], ['EEUU local', 'EE.UU. en local', 'EE.UU. local']];
+  const FILTROS_DONDE = ['todo', 'Argentina', 'EEUU online', 'EEUU local', 'sin', 'regalos', 'repetidos'];
 
   const ICONOS = {
     check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -24,7 +27,8 @@
     lupa: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
     cerrar: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
     flecha: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    ajustes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>'
+    ajustes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+    regalo: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="11" width="15" height="9" rx="1.8"/><rect x="3" y="7.5" width="18" height="3.5" rx="1.2"/><path d="M12 7.5V20"/><path d="M12 7.5C10.8 4.6 7.5 4.2 7.5 6c0 1.1 1.8 1.5 4.5 1.5zM12 7.5c1.2-2.9 4.5-3.3 4.5-1.5 0 1.1-1.8 1.5-4.5 1.5z"/></svg>'
   };
 
   /* ───────────── Estado ───────────── */
@@ -41,13 +45,17 @@
     enviando: false,
     sinConexion: false,
     previa: '#lista',
-    ultimo: { categoria: '', urgencia: URGENCIAS[0], responsable: '' },
+    ultimo: { categoria: '', urgencia: URGENCIAS[0], responsable: '', comprar_en: '' },
     mantitaAnimada: false,
     error: '',
-    busqueda: ''
+    busqueda: '',
+    clasificando: false,
+    // Ítems tocados en modo clasificar: siguen a la vista aunque ya no pasen el filtro, hasta cambiar de filtro
+    tocados: {}
   };
 
   let cacheOpciones = null;
+  let cacheRepetidos = null;
   let temporizadorToast = null;
 
   /* ───────────── Utilidades ───────────── */
@@ -202,6 +210,57 @@
 
   function itemsActivos() { return app.items.filter(function (it) { return !si(it.no_necesario); }); }
 
+  // Dónde se compra: Argentina, EE.UU. online o EE.UU. en local. Vacío = sin definir
+  function lugarDe(it) {
+    const v = texto(it.comprar_en);
+    return LUGARES.some(function (l) { return l[0] === v; }) ? v : '';
+  }
+
+  // Quién dijo que lo regala (antes de que llegue). Cuando llega, pasa a "de_quien"
+  function quienRegala(it) { return texto(it.regala); }
+
+  function nombreLugar(v) {
+    const l = LUGARES.find(function (x) { return x[0] === v; });
+    return l ? l[1] : 'Sin definir';
+  }
+
+  // Ítems que pueden ser la misma cosa comparten el mismo texto en la columna "repetido"
+  function claveRepetido(it) { return sinAcentos(texto(it.repetido)); }
+
+  function gruposRepetidos() {
+    if (!cacheRepetidos) {
+      cacheRepetidos = {};
+      app.items.forEach(function (it) {
+        const k = claveRepetido(it);
+        if (k && !si(it.no_necesario)) (cacheRepetidos[k] = cacheRepetidos[k] || []).push(it);
+      });
+    }
+    return cacheRepetidos;
+  }
+
+  // Los otros ítems del mismo grupo que siguen en la lista (los que pasaron al archivo no cuentan)
+  function gemelos(it) {
+    const k = claveRepetido(it);
+    if (!k || si(it.no_necesario)) return [];
+    return (gruposRepetidos()[k] || []).filter(function (x) { return x.id !== it.id; });
+  }
+
+  function estaRepetido(it) { return gemelos(it).length > 0; }
+
+  // Deja cada grupo de repetidos junto, en el lugar del primero que aparece
+  function juntarRepetidos(lista) {
+    const vistos = {};
+    const salida = [];
+    lista.forEach(function (it) {
+      if (vistos[it.id]) return;
+      const k = estaRepetido(it) ? claveRepetido(it) : '';
+      lista.forEach(function (x) {
+        if (!vistos[x.id] && (x.id === it.id || (k && claveRepetido(x) === k))) { vistos[x.id] = true; salida.push(x); }
+      });
+    });
+    return salida;
+  }
+
   function progreso(items) {
     const p = { total: 0, tengo: 0, elegido: 0, pct: 0 };
     items.forEach(function (it) {
@@ -320,11 +379,13 @@
     app.config = datos.config || {};
     app.cargado = true;
     cacheOpciones = null;
+    cacheRepetidos = null;
     return true;
   }
 
   function aplicarLocal(cambio) {
     cacheOpciones = null;
+    cacheRepetidos = null;
     if (cambio.tabla === 'Config') {
       if (cambio.tipo === 'guardar') app.config[cambio.fila.clave] = cambio.fila.valor;
       return;
@@ -355,15 +416,18 @@
     pintarSync();
     let resincronizar = false;
     while (app.cola.length) {
+      // Hasta 20 tandas por pedido: clasificar genera muchos toques seguidos
+      const n = Math.min(app.cola.length, 20);
       try {
-        const datos = await llamar({ accion: 'cambios', cambios: app.cola[0] });
-        app.cola.shift();
+        const lote = [].concat.apply([], app.cola.slice(0, n));
+        const datos = await llamar({ accion: 'cambios', cambios: lote });
+        app.cola.splice(0, n);
         setConexion(true);
         if (!app.cola.length && aplicarServidor(datos)) render();
       } catch (e) {
         if (e.message === 'pin_incorrecto') { app.cola = []; manejarError(e); break; }
         if (e.servidor) {
-          app.cola.shift();
+          app.cola.splice(0, n);
           resincronizar = true;
           toast('No se pudo guardar un cambio: ' + e.message);
           continue;
@@ -557,19 +621,48 @@
       '<span class="seg tengo" style="width:' + a + '%"></span><span class="seg elegido" style="width:' + b + '%"></span></div>';
   }
 
-  function filaItem(it, conCategoria) {
+  // extra: { clasificar: muestra los botones de dónde y regalo, lugar: suma dónde se compra al texto, repetido: muestra la marca }
+  function filaItem(it, conCategoria, extra) {
+    extra = extra || {};
     const hecha = estadoItem(it) === 'conseguido';
     const cat = categoriaDe(it);
     const cant = parseInt(it.cantidad, 10) || 1;
     const id = esc(it.id);
-    return '<li class="fila' + (hecha ? ' hecha' : '') + '">' +
-      '<button class="check" type="button" data-accion="alternar" data-id="' + id + '" aria-pressed="' + hecha + '" aria-label="' + (hecha ? 'Desmarcar ' : 'Marcar como conseguido: ') + esc(it.nombre) + '">' + ICONOS.check + '</button>' +
+    const lugar = (extra.lugar && lugarDe(it) ? nombreLugar(lugarDe(it)) + '. ' : '') +
+      (!hecha && quienRegala(it) ? 'Lo regala ' + quienRegala(it) + '. ' : '');
+    const marcaRepetido = extra.repetido !== false && estaRepetido(it) ? ' <span class="marca-repetido">Repetido</span>' : '';
+    const marcaRegalo = si(it.posible_regalo) ? ' <span class="marca-regalo" title="Puede ser un regalo">' + ICONOS.regalo + '<span class="oculto">Puede ser un regalo</span></span>' : '';
+    return '<li class="fila' + (hecha ? ' hecha' : '') + (extra.clasificar ? ' clasificando' : '') + '">' +
+      (extra.clasificar ? '' : '<button class="check" type="button" data-accion="alternar" data-id="' + id + '" aria-pressed="' + hecha + '" aria-label="' + (hecha ? 'Desmarcar ' : 'Marcar como conseguido: ') + esc(it.nombre) + '">' + ICONOS.check + '</button>') +
       '<a class="fila-cuerpo" href="#item/' + encodeURIComponent(it.id) + '">' +
-        '<span class="fila-nombre">' + esc(it.nombre) + (cant > 1 ? ' <span class="cantidad">×' + cant + '</span>' : '') + '</span>' +
-        '<span class="fila-meta"><i class="punto" style="--c:' + colorCat(cat) + '"></i>' + (conCategoria ? esc(cat) + '. ' : '') + esc(textoEstado(it)) + '</span>' +
+        '<span class="fila-nombre">' + esc(it.nombre) + (cant > 1 ? ' <span class="cantidad">×' + cant + '</span>' : '') + marcaRegalo + marcaRepetido + '</span>' +
+        '<span class="fila-meta"><i class="punto" style="--c:' + colorCat(cat) + '"></i>' + (conCategoria ? esc(cat) + '. ' : '') + esc(lugar) + esc(textoEstado(it)) + '</span>' +
       '</a>' +
       (it.responsable ? '<span class="avatar" title="Se encarga ' + esc(it.responsable) + '">' + esc(inicial(it.responsable)) + '</span>' : '') +
+      (extra.clasificar ? botonesCompra(it, false) : '') +
     '</li>';
+  }
+
+  // Los tres lugares y el regalo. En la lista van compactos; en el detalle, con texto
+  function botonesCompra(it, conTexto) {
+    const actual = lugarDe(it);
+    const id = esc(it.id);
+    const regalo = si(it.posible_regalo);
+    const lugares = '<div class="lugares" role="group" aria-label="Dónde lo compramos">' + LUGARES.map(function (l) {
+      return '<button type="button" data-accion="lugar" data-id="' + id + '" data-valor="' + esc(l[0]) + '" aria-pressed="' + (l[0] === actual) + '">' + esc(conTexto ? l[1] : l[2]) + '</button>';
+    }).join('') + '</div>';
+    if (conTexto) {
+      const quien = quienRegala(it);
+      const lineaQuien = regalo && estadoItem(it) !== 'conseguido'
+        ? '<div class="quien-regala">' + (quien
+            ? '<p>Lo regala <strong>' + esc(quien) + '</strong></p><button class="btn texto" type="button" data-accion="anotar-regala" data-id="' + id + '">Cambiar</button>'
+            : '<button class="btn secundario" type="button" data-accion="anotar-regala" data-id="' + id + '">Anotar quién lo regala</button>') +
+          '</div>'
+        : '';
+      return lugares + '<button class="toggle" type="button" data-accion="regalo" data-id="' + id + '" aria-pressed="' + regalo + '">' + ICONOS.check + '<span>Puede ser un regalo</span></button>' + lineaQuien;
+    }
+    return '<div class="clasif">' + lugares +
+      '<button class="boton-regalo" type="button" data-accion="regalo" data-id="' + id + '" aria-pressed="' + regalo + '" aria-label="Puede ser un regalo: ' + esc(it.nombre) + '" title="Puede ser un regalo">' + ICONOS.regalo + '</button></div>';
   }
 
   function segmentado(accion, opciones, actual) {
@@ -675,6 +768,10 @@
     const aviso = porAgradecer
       ? '<a class="aviso" href="#plata">' + (porAgradecer === 1 ? 'Hay un regalo' : 'Hay ' + porAgradecer + ' regalos') + ' por agradecer</a>'
       : '';
+    const sinLugar = items.filter(function (it) { return !lugarDe(it) && estadoItem(it) !== 'conseguido'; }).length;
+    const avisoLugar = sinLugar
+      ? '<a class="aviso suave" href="#lista" data-accion="ir-a-clasificar">' + (sinLugar === 1 ? 'Falta decidir dónde comprar 1 cosa' : 'Falta decidir dónde comprar ' + sinLugar + ' cosas') + '</a>'
+      : '';
 
     const porCategoria = agrupar(items, 'categoria').map(function (par) {
       const pc = progreso(par[1]);
@@ -682,7 +779,7 @@
       return '<li><div class="barra-titulo"><span><i class="punto" style="--c:' + color + '"></i>' + esc(par[0]) + '</span><span>' + pc.tengo + ' de ' + pc.total + '</span></div>' + barra(pc, color) + '</li>';
     }).join('');
 
-    return cabecera + cuenta + mantita(items) + resumen + bloqueProximos + aviso +
+    return cabecera + cuenta + mantita(items) + resumen + bloqueProximos + aviso + avisoLugar +
       '<section><h2>Por categoría</h2><ul class="lista-plana">' + porCategoria + '</ul></section>';
   }
 
@@ -693,6 +790,60 @@
   function filtroLista() {
     const guardado = leerLS(LS.filtro);
     return ['falta', 'conseguidos', 'todo'].indexOf(guardado) !== -1 ? guardado : 'falta';
+  }
+
+  function filtroDonde() {
+    const guardado = leerLS(LS.donde);
+    return FILTROS_DONDE.indexOf(guardado) !== -1 ? guardado : 'todo';
+  }
+
+  // Con el filtro "Repetidos", la lista se agrupa por grupo de repetidos en lugar de por categoría
+  function modoAgrupado() {
+    return filtroDonde() === 'repetidos' && !terminosBusqueda().length ? 'repetidos' : modoLista();
+  }
+
+  function pasaEstado(it, filtro) {
+    const e = estadoItem(it);
+    if (filtro === 'todo') return true;
+    return filtro === 'conseguidos' ? e === 'conseguido' : e !== 'conseguido';
+  }
+
+  function pasaDonde(it, donde) {
+    if (app.clasificando && app.tocados[it.id]) return true;
+    if (donde === 'todo') return true;
+    if (donde === 'regalos') return si(it.posible_regalo);
+    if (donde === 'repetidos') return estaRepetido(it);
+    if (donde === 'sin') return !lugarDe(it);
+    return lugarDe(it) === donde;
+  }
+
+  function conteosDonde() {
+    const filtro = filtroLista();
+    const c = { todo: 0, sin: 0, regalos: 0, repetidos: 0 };
+    LUGARES.forEach(function (l) { c[l[0]] = 0; });
+    itemsActivos().forEach(function (it) {
+      if (estaRepetido(it)) c.repetidos++;
+      if (!pasaEstado(it, filtro)) return;
+      c.todo++;
+      c[lugarDe(it) || 'sin']++;
+      if (si(it.posible_regalo)) c.regalos++;
+    });
+    return c;
+  }
+
+  function filtrosDonde(actual) {
+    const c = conteosDonde();
+    const opciones = [['todo', 'Todos']].concat(LUGARES.map(function (l) { return [l[0], l[1]]; }), [['sin', 'Sin definir'], ['regalos', 'Para regalar'], ['repetidos', 'Repetidos']]);
+    return '<div class="filtros" role="group" aria-label="Qué mostrar" data-scroll-id="filtros-donde">' + opciones.map(function (o) {
+      if (o[0] === 'repetidos' && !c.repetidos && actual !== 'repetidos') return '';
+      return '<button type="button" data-accion="donde" data-valor="' + esc(o[0]) + '" aria-pressed="' + (o[0] === actual) + '">' + esc(o[1]) + '<span class="n">' + c[o[0]] + '</span></button>';
+    }).join('') + '</div>';
+  }
+
+  function cambiarFiltro(clave, valor) {
+    guardarLS(clave, valor);
+    app.tocados = {};
+    render();
   }
 
   // Los grupos colapsados se recuerdan en cada celular, por separado para "Por categoría" y "Por urgencia"
@@ -720,7 +871,7 @@
 
   // Busca en el nombre, la categoría, las notas y en los modelos y tiendas de sus opciones
   function coincide(it, terminos) {
-    const partes = [it.nombre, it.categoria, it.urgencia, it.notas];
+    const partes = [it.nombre, it.categoria, it.urgencia, it.notas, it.regala];
     opcionesDe(it.id).forEach(function (o) { partes.push(o.nombre, o.tienda); });
     const textoItem = sinAcentos(partes.join(' '));
     return terminos.every(function (t) { return textoItem.indexOf(t) !== -1; });
@@ -728,23 +879,34 @@
 
   // Grupos que se muestran: [nombre, todos sus ítems, ítems visibles]
   function gruposLista() {
-    const modo = modoLista();
+    const modo = modoAgrupado();
     const filtro = filtroLista();
+    const donde = filtroDonde();
     const terminos = terminosBusqueda();
+    if (modo === 'repetidos') {
+      // Todos los del grupo juntos, aunque estén en distintas categorías o ya conseguidos
+      const mapa = new Map();
+      itemsActivos().forEach(function (it) {
+        if (!pasaDonde(it, 'repetidos')) return;
+        const k = claveRepetido(it);
+        if (!mapa.has(k)) mapa.set(k, [texto(it.repetido), []]);
+        mapa.get(k)[1].push(it);
+      });
+      return Array.from(mapa.values())
+        .sort(function (a, b) { return a[0].localeCompare(b[0], 'es'); })
+        .map(function (par) { return [par[0], par[1], par[1].slice().sort(ordenarFilas)]; });
+    }
     const pasa = terminos.length
       ? function (it) { return coincide(it, terminos); }
-      : function (it) {
-          const e = estadoItem(it);
-          if (filtro === 'todo') return true;
-          return filtro === 'conseguidos' ? e === 'conseguido' : e !== 'conseguido';
-        };
+      : function (it) { return pasaEstado(it, filtro) && pasaDonde(it, donde); };
     return agrupar(itemsActivos(), modo).map(function (par) {
-      return [par[0], par[1], par[1].filter(pasa).sort(ordenarFilas)];
+      return [par[0], par[1], juntarRepetidos(par[1].filter(pasa).sort(ordenarFilas))];
     }).filter(function (g) { return g[2].length; });
   }
 
   function vistaLista() {
-    return '<header class="cabecera"><h1>Lista</h1></header>' +
+    return '<header class="cabecera"><h1>Lista</h1>' +
+        '<button class="btn chico' + (app.clasificando ? ' activo' : '') + '" type="button" data-accion="clasificar" aria-pressed="' + app.clasificando + '">' + (app.clasificando ? 'Listo' : 'Clasificar') + '</button></header>' +
       '<div class="buscador" role="search">' + ICONOS.lupa +
         '<input id="buscador" type="search" value="' + esc(app.busqueda) + '" placeholder="Buscar en la lista" aria-label="Buscar en la lista" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">' +
         '<button class="limpiar" type="button" data-accion="limpiar-busqueda" aria-label="Borrar búsqueda"' + (app.busqueda ? '' : ' hidden') + '>' + ICONOS.cerrar + '</button>' +
@@ -754,8 +916,9 @@
   }
 
   function contenidoLista() {
-    const modo = modoLista();
+    const modo = modoAgrupado();
     const filtro = filtroLista();
+    const donde = filtroDonde();
     const activos = itemsActivos();
     const grupos = gruposLista();
     const buscando = terminosBusqueda().length > 0;
@@ -768,13 +931,19 @@
       const abierto = buscando || colapsados.indexOf(nombre) === -1;
       const pc = progreso(g[1]);
       const punto = modo === 'categoria' ? '<i class="punto" style="--c:' + colorCat(nombre) + '"></i>' : '';
+      const conteo = modo === 'repetidos' ? g[1].length + ' en la lista' : pc.tengo + ' de ' + pc.total;
       const cabecera = buscando
         ? '<span class="grupo-toggle estatico">' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span></span>'
         : '<button class="grupo-toggle" type="button" data-accion="colapsar" data-grupo="' + esc(nombre) + '" aria-expanded="' + abierto + '">' +
             '<span class="flecha">' + ICONOS.flecha + '</span>' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span>' +
-            '<span class="conteo">' + pc.tengo + ' de ' + pc.total + '</span></button>';
+            '<span class="conteo">' + conteo + '</span></button>';
+      const extra = {
+        clasificar: app.clasificando,
+        lugar: ['todo', 'regalos', 'repetidos'].indexOf(donde) !== -1 || buscando,
+        repetido: modo !== 'repetidos'
+      };
       cuerpo += '<section class="grupo' + (abierto ? '' : ' colapsado') + '"><h2 class="grupo-cabecera">' + cabecera + '</h2>' +
-        (abierto ? '<ul class="lista">' + g[2].map(function (it) { return filaItem(it, modo === 'urgencia'); }).join('') + '</ul>' : '') +
+        (abierto ? '<ul class="lista">' + g[2].map(function (it) { return filaItem(it, modo !== 'categoria', extra); }).join('') + '</ul>' : '') +
       '</section>';
     });
 
@@ -790,19 +959,60 @@
     if (!activos.length) {
       cuerpo = '<div class="vacio"><p>La lista está vacía. Agreguen lo primero que se les ocurra; después se ordena solo.</p></div>';
     } else if (!cuerpo) {
-      cuerpo = filtro === 'falta'
-        ? '<p class="nota">No falta nada: todo lo de la lista está conseguido.</p>'
-        : '<p class="nota">Todavía no conseguimos nada de la lista.</p>';
+      cuerpo = '<p class="nota">' + listaVacia(donde, filtro) + '</p>';
     }
 
     const contraer = grupos.length > 1
       ? '<div class="lista-acciones"><button class="btn texto" type="button" data-accion="colapsar-todo">' + (todosColapsados ? 'Expandir todo' : 'Contraer todo') + '</button></div>'
       : '';
 
+    let explicacion = '';
+    if (donde === 'repetidos') {
+      explicacion = '<p class="nota explicacion">Cosas que pueden ser la misma. Si lo son, dejen una y en la otra toquen “No necesitamos este”: pasa al archivo, no se borra.</p>';
+    } else if (donde === 'regalos') {
+      explicacion = panelRegalos();
+    } else if (app.clasificando) {
+      explicacion = '<p class="nota explicacion">Tocá dónde se compra cada cosa. El paquetito marca lo que alguien nos puede regalar.</p>';
+    }
+
     return '<div class="controles">' +
-        segmentado('modo', [['categoria', 'Por categoría'], ['urgencia', 'Por urgencia']], modo) +
-        segmentado('filtro', [['falta', 'Falta'], ['conseguidos', 'Conseguido'], ['todo', 'Todo']], filtro) +
-      '</div>' + contraer + cuerpo;
+        segmentado('modo', [['categoria', 'Por categoría'], ['urgencia', 'Por urgencia']], modoLista()) +
+        (donde === 'repetidos' ? '' : segmentado('filtro', [['falta', 'Falta'], ['conseguidos', 'Conseguido'], ['todo', 'Todo']], filtro)) +
+        filtrosDonde(donde) +
+      '</div>' + explicacion + contraer + cuerpo;
+  }
+
+  function listaVacia(donde, filtro) {
+    if (donde === 'sin') return 'Todo lo que falta ya tiene dónde comprarse.';
+    if (donde === 'regalos') return 'Todavía no marcaron nada que pueda ser regalo. Con “Clasificar” se marca rápido desde la lista.';
+    if (donde === 'repetidos') return 'No quedan repetidos.';
+    if (donde !== 'todo') return 'No hay nada para ' + nombreLugar(donde) + ' en este filtro.';
+    return filtro === 'falta'
+      ? 'No falta nada: todo lo de la lista está conseguido.'
+      : 'Todavía no conseguimos nada de la lista.';
+  }
+
+  // Ideas de regalo que todavía no conseguimos, en el orden de las categorías
+  function ideasDeRegalo() {
+    const cats = categorias();
+    return itemsActivos().filter(function (it) { return si(it.posible_regalo) && estadoItem(it) !== 'conseguido'; })
+      .sort(function (a, b) {
+        return cats.indexOf(categoriaDe(a)) - cats.indexOf(categoriaDe(b)) || texto(a.nombre).localeCompare(texto(b.nombre), 'es');
+      });
+  }
+
+  function panelRegalos() {
+    const ideas = ideasDeRegalo();
+    const n = ideas.length;
+    if (!n) return '';
+    const libres = ideas.filter(function (it) { return !quienRegala(it); }).length;
+    const conQuien = n - libres;
+    return '<div class="panel-regalos"><p>' + n + ' ' + plural(n, 'idea de regalo', 'ideas de regalo') + ' sin conseguir' +
+        (conQuien ? '. ' + (conQuien === 1 ? 'Una ya tiene' : conQuien + ' ya tienen') + ' quién la regale' : '') + '.</p>' +
+      (libres
+        ? '<button class="btn secundario" type="button" data-accion="copiar-regalos">' + (conQuien ? (libres === 1 ? 'Copiar la que queda libre' : 'Copiar las ' + libres + ' libres') : 'Copiar la lista') + ' para mandar</button>'
+        : '<p class="nota">Todas tienen quién las regale.</p>') +
+    '</div>';
   }
 
   function actualizarContenidoLista() {
@@ -814,7 +1024,7 @@
   }
 
   function alternarGrupo(nombre) {
-    const modo = modoLista();
+    const modo = modoAgrupado();
     const colapsados = leerColapsados(modo);
     const i = colapsados.indexOf(nombre);
     if (i === -1) colapsados.push(nombre); else colapsados.splice(i, 1);
@@ -823,7 +1033,7 @@
   }
 
   function alternarTodos() {
-    const modo = modoLista();
+    const modo = modoAgrupado();
     const nombres = gruposLista().map(function (g) { return g[0]; });
     const colapsados = leerColapsados(modo);
     const todos = nombres.every(function (n) { return colapsados.indexOf(n) !== -1; });
@@ -863,12 +1073,29 @@
           '</div></section>'
       : '';
 
+    const compra = e === 'no_necesario' ? '' :
+      '<div class="compra" aria-label="Dónde lo compramos"><p class="etiqueta">¿Dónde lo compramos?</p>' + botonesCompra(it, true) + '</div>';
+
     return '<header class="cabecera fina">' + volver +
         '<button class="btn chico" type="button" data-accion="editar-item" data-id="' + esc(it.id) + '">Editar</button></header>' +
       '<h1 class="item-titulo">' + esc(it.nombre) + '</h1>' +
       '<div class="datos">' + datos + '</div>' +
+      compra + (estaRepetido(it) ? bloqueRepetido(it) : '') +
       bloqueEstado(it, e, el) + comparador +
       (it.notas ? '<section><h2>Notas</h2><p class="notas">' + esc(it.notas) + '</p></section>' : '');
+  }
+
+  function bloqueRepetido(it) {
+    const id = esc(it.id);
+    const otros = gemelos(it);
+    return '<section class="repetido"><h2>Puede estar repetido</h2>' +
+      '<p class="nota">' + (otros.length === 1 ? 'En la lista también está esto:' : 'En la lista también están estos:') + '</p>' +
+      '<ul class="lista">' + otros.map(function (x) { return filaItem(x, true, { lugar: true, repetido: false }); }).join('') + '</ul>' +
+      '<p class="nota">Si es lo mismo, dejen uno solo. El que sobra pasa al archivo, no se borra.</p>' +
+      '<div class="estado-acciones">' +
+        '<button class="btn secundario" type="button" data-accion="sobra" data-id="' + id + '">No necesitamos este</button>' +
+        '<button class="btn texto" type="button" data-accion="no-repetido" data-id="' + id + '">No es lo mismo</button>' +
+      '</div></section>';
   }
 
   function bloqueEstado(it, e, el) {
@@ -1075,7 +1302,13 @@
 
   function abrirHojaItem(it) {
     const nuevo = !it;
-    const v = it || { nombre: '', categoria: app.ultimo.categoria, urgencia: app.ultimo.urgencia, responsable: app.ultimo.responsable, cantidad: '1', presupuesto: '', notas: '' };
+    const donde = filtroDonde();
+    const v = it || {
+      nombre: '', categoria: app.ultimo.categoria, urgencia: app.ultimo.urgencia, responsable: app.ultimo.responsable, cantidad: '1', presupuesto: '', notas: '',
+      // Si están mirando un lugar o los regalos, lo nuevo arranca así
+      comprar_en: LUGARES.some(function (l) { return l[0] === donde; }) ? donde : app.ultimo.comprar_en,
+      posible_regalo: donde === 'regalos' ? 'sí' : ''
+    };
     const n = personas();
     const html = '<form class="form" data-form="item"' + (nuevo ? '' : ' data-id="' + esc(it.id) + '"') + ' autocomplete="off">' +
       '<div class="hoja-cabecera"><h2>' + (nuevo ? 'Agregar algo' : 'Editar') + '</h2>' + botonCerrar() + '</div>' +
@@ -1086,6 +1319,9 @@
       '</fieldset>' +
       grupoChips('¿Para cuándo?', 'urgencia', URGENCIAS.map(function (u) { return [u, u]; }), v.urgencia) +
       grupoChips('¿Quién se encarga?', 'responsable', [['', 'Sin asignar'], [n[0], n[0]], [n[1], n[1]]], v.responsable || '') +
+      grupoChips('¿Dónde lo compramos?', 'comprar_en', [['', 'Sin definir']].concat(LUGARES.map(function (l) { return [l[0], l[1]]; })), lugarDe(v)) +
+      interruptor('Puede ser un regalo', 'posible_regalo', si(v.posible_regalo)) +
+      campo('¿Quién lo regala?', '<input name="regala" maxlength="60" value="' + esc(v.regala || '') + '" placeholder="Opcional. Ej: la abuela">', 'Si alguien ya dijo que lo regala.') +
       '<div class="campo"><span class="etiqueta">Cantidad</span><div class="stepper">' +
         '<button type="button" data-accion="paso" data-delta="-1" aria-label="Menos">−</button>' +
         '<input name="cantidad" type="number" inputmode="numeric" min="1" value="' + esc(v.cantidad || '1') + '" aria-label="Cantidad">' +
@@ -1119,7 +1355,10 @@
       responsable: texto(fd.get('responsable')),
       cantidad: String(Math.max(1, parseInt(fd.get('cantidad'), 10) || 1)),
       presupuesto: limpiarPrecio(fd.get('presupuesto')),
-      notas: texto(fd.get('notas'))
+      notas: texto(fd.get('notas')),
+      comprar_en: texto(fd.get('comprar_en')),
+      regala: texto(fd.get('regala')),
+      posible_regalo: fd.get('posible_regalo') || texto(fd.get('regala')) ? 'sí' : ''
     };
     const antes = editando ? buscarItem(editando) : null;
     const eraNoNecesario = antes ? si(antes.no_necesario) : false;
@@ -1130,7 +1369,7 @@
     if (categoria && cats.indexOf(categoria) === -1) {
       cambios.push(g('Config', { clave: 'categorias', valor: cats.concat(categoria).join(', ') }));
     }
-    app.ultimo = { categoria: categoria, urgencia: fila.urgencia, responsable: fila.responsable };
+    app.ultimo = { categoria: categoria, urgencia: fila.urgencia, responsable: fila.responsable, comprar_en: fila.comprar_en };
     cambiar(cambios);
 
     if (!editando && boton && boton.name === 'seguir') {
@@ -1191,12 +1430,50 @@
     toast(f.dataset.id ? 'Guardado' : 'Agregamos la opción');
   }
 
+  function abrirHojaRegala(id) {
+    const it = buscarItem(id);
+    if (!it) return;
+    const actual = quienRegala(it);
+    // Los nombres que ya usaron, para no tener que escribirlos de nuevo
+    const usados = [];
+    app.items.forEach(function (x) {
+      [quienRegala(x), x.conseguido_tipo === 'regalo' ? texto(x.de_quien) : ''].forEach(function (q) {
+        if (q && q !== actual && usados.indexOf(q) === -1) usados.push(q);
+      });
+    });
+    const html = '<form class="form" data-form="regala" data-id="' + esc(id) + '" autocomplete="off">' +
+      '<div class="hoja-cabecera"><h2>¿Quién lo regala?</h2>' + botonCerrar() + '</div>' +
+      '<p class="hoja-sub">' + esc(it.nombre) + '</p>' +
+      campo('Nombre', '<input name="regala" maxlength="60" value="' + esc(actual) + '" placeholder="Ej: la abuela, tía Maru">') +
+      (usados.length
+        ? '<div class="sugerencias" role="group" aria-label="Nombres que ya usaron">' + usados.slice(0, 8).map(function (q) {
+            return '<button class="chip-boton" type="button" data-accion="sugerir-regala" data-valor="' + esc(q) + '">' + esc(q) + '</button>';
+          }).join('') + '</div>'
+        : '') +
+      '<div class="form-acciones">' +
+        (actual ? '<button class="btn texto" type="button" data-accion="borrar-regala" data-id="' + esc(id) + '">Sacar</button>' : '') +
+        '<button class="btn primario" type="submit">Guardar</button>' +
+      '</div></form>';
+    abrirHoja(html, function (h) { $('input[name="regala"]', h).focus(); });
+  }
+
+  function guardarRegala(id, valor) {
+    const it = buscarItem(id);
+    if (!it) return;
+    const antes = { id: id, regala: it.regala || '', posible_regalo: it.posible_regalo || '' };
+    const fila = { id: id, regala: valor };
+    if (valor) fila.posible_regalo = 'sí';
+    cambiar([g('Items', fila)]);
+    cerrarHoja();
+    toast(valor ? 'Anotamos que lo regala ' + valor : 'Sacamos quién lo regala', [{ texto: 'Deshacer', fn: function () { cambiar([g('Items', antes)]); } }]);
+  }
+
   function abrirHojaConseguido(id) {
     const it = buscarItem(id);
     if (!it) return;
     const el = elegidaDe(id);
-    const tipo = it.conseguido_tipo === 'regalo' || it.conseguido_tipo === 'prestado' ? it.conseguido_tipo : 'compra';
     const ya = estadoItem(it) === 'conseguido';
+    const tipo = it.conseguido_tipo === 'regalo' || it.conseguido_tipo === 'prestado' ? it.conseguido_tipo : (!ya && quienRegala(it) ? 'regalo' : 'compra');
     const html = '<form class="form" data-form="conseguido" data-id="' + esc(id) + '" data-tipo="' + tipo + '" autocomplete="off">' +
       '<div class="hoja-cabecera"><h2>Ya lo tenemos</h2>' + botonCerrar() + '</div>' +
       '<p class="hoja-sub">' + esc(it.nombre) + '</p>' +
@@ -1208,7 +1485,7 @@
       '</div>' +
       '<div class="solo-regalo solo-prestado">' +
         campo('<span class="t-regalo">¿Quién nos lo regaló?</span><span class="t-prestado">¿Quién nos lo prestó?</span>',
-          '<input name="de_quien" maxlength="60" value="' + esc(it.de_quien || '') + '">',
+          '<input name="de_quien" maxlength="60" value="' + esc(it.de_quien || (!ya ? quienRegala(it) : '')) + '">',
           '<span class="t-prestado">Si ya lo teníamos, dejalo vacío.</span>') +
       '</div>' +
       '<div class="solo-regalo">' +
@@ -1305,6 +1582,15 @@
     if (estadoItem(it) === 'conseguido') { desmarcar(id); return; }
     const el = elegidaDe(id);
     const antes = copiaCampos(it, CAMPOS_CONSEGUIDO);
+    const quien = quienRegala(it);
+    if (quien) {
+      cambiar([g('Items', { id: id, conseguido_tipo: 'regalo', conseguido_fecha: hoyISO(), de_quien: quien })]);
+      toast('Marcamos que nos lo regaló ' + quien, [
+        { texto: 'Editar', fn: function () { abrirHojaConseguido(id); } },
+        { texto: 'Deshacer', fn: function () { cambiar([g('Items', antes)]); } }
+      ]);
+      return;
+    }
     cambiar([g('Items', {
       id: id,
       conseguido_tipo: 'compra',
@@ -1354,6 +1640,78 @@
     cambiar([g('Opciones', fila)]);
   }
 
+  function ponerLugar(id, valor) {
+    const it = buscarItem(id);
+    if (!it) return;
+    if (app.clasificando) app.tocados[id] = true;
+    cambiar([g('Items', { id: id, comprar_en: lugarDe(it) === valor ? '' : valor })]);
+  }
+
+  function alternarRegalo(id) {
+    const it = buscarItem(id);
+    if (!it) return;
+    if (app.clasificando) app.tocados[id] = true;
+    cambiar([g('Items', { id: id, posible_regalo: si(it.posible_regalo) ? '' : 'sí' })]);
+  }
+
+  function marcarSobra(id) {
+    const it = buscarItem(id);
+    if (!it) return;
+    cambiar([g('Items', { id: id, no_necesario: 'sí' })]);
+    toast('Pasamos “' + it.nombre + '” al archivo', [{ texto: 'Deshacer', fn: function () { cambiar([g('Items', { id: id, no_necesario: '' })]); } }]);
+  }
+
+  function noEsRepetido(id) {
+    const it = buscarItem(id);
+    if (!it) return;
+    const antes = it.repetido || '';
+    cambiar([g('Items', { id: id, repetido: '' })]);
+    toast('Ya no aparece como repetido', [{ texto: 'Deshacer', fn: function () { cambiar([g('Items', { id: id, repetido: antes })]); } }]);
+  }
+
+  function alternarClasificar() {
+    app.clasificando = !app.clasificando;
+    app.tocados = {};
+    render();
+  }
+
+  // Desde el aviso de Inicio: abre la lista con lo que falta clasificar
+  function irAClasificar() {
+    guardarLS(LS.donde, 'sin');
+    guardarLS(LS.filtro, 'falta');
+    app.clasificando = true;
+    app.tocados = {};
+    if (location.hash === '#lista') render({ arriba: true });
+    else location.hash = '#lista';
+  }
+
+  function copiarRegalos() {
+    // Solo las que nadie eligió todavía, para que no se repitan regalos
+    const lineasRegalo = ideasDeRegalo().filter(function (it) { return !quienRegala(it); }).map(function (it) {
+      const cant = parseInt(it.cantidad, 10) || 1;
+      const el = elegidaDe(it.id);
+      let l = '• ' + texto(it.nombre) + (cant > 1 ? ' (×' + cant + ')' : '');
+      if (el) {
+        const link = hrefSeguro(el.link);
+        l += (el.nombre ? ': ' + texto(el.nombre) : '') + (link ? ' ' + link : '');
+      }
+      return l;
+    });
+    copiarTexto('Ideas de regalo:\n' + lineasRegalo.join('\n'), 'Copiamos la lista. Ya la podés pegar en un mensaje.', 'Ideas de regalo');
+  }
+
+  async function copiarTexto(datos, mensaje, titulo) {
+    try {
+      await navigator.clipboard.writeText(datos);
+      toast(mensaje);
+    } catch (e) {
+      abrirHoja('<div class="form"><div class="hoja-cabecera"><h2>' + esc(titulo) + '</h2>' + botonCerrar() + '</div>' +
+        '<p class="hoja-sub">Seleccioná todo el texto y copialo.</p>' +
+        '<textarea class="exportado" rows="10" readonly>' + esc(datos) + '</textarea></div>',
+        function (h) { const t = $('textarea', h); t.focus(); t.select(); });
+    }
+  }
+
   function alternarAgradecido(id) {
     const it = buscarItem(id);
     if (!it) return;
@@ -1379,17 +1737,9 @@
     cambiar([borrar('Opciones', id)]);
   }
 
-  async function exportar() {
+  function exportar() {
     const datos = JSON.stringify({ exportado: new Date().toISOString(), config: app.config, items: app.items, opciones: app.opciones });
-    try {
-      await navigator.clipboard.writeText(datos);
-      toast('Copiamos todos los datos. Ya los podés pegar en el chat.');
-    } catch (e) {
-      abrirHoja('<div class="form"><div class="hoja-cabecera"><h2>Datos</h2>' + botonCerrar() + '</div>' +
-        '<p class="hoja-sub">Seleccioná todo el texto y copialo.</p>' +
-        '<textarea class="exportado" rows="10" readonly>' + esc(datos) + '</textarea></div>',
-        function (h) { const t = $('textarea', h); t.focus(); t.select(); });
-    }
+    copiarTexto(datos, 'Copiamos todos los datos. Ya los podés pegar en el chat.', 'Datos');
   }
 
   function salir() {
@@ -1467,7 +1817,23 @@
       case 'colapsar': alternarGrupo(el.dataset.grupo); break;
       case 'colapsar-todo': alternarTodos(); break;
       case 'modo': guardarLS(LS.modo, el.dataset.valor); render(); break;
-      case 'filtro': guardarLS(LS.filtro, el.dataset.valor); render(); break;
+      case 'filtro': cambiarFiltro(LS.filtro, el.dataset.valor); break;
+      case 'donde': cambiarFiltro(LS.donde, el.dataset.valor); break;
+      case 'clasificar': alternarClasificar(); break;
+      case 'ir-a-clasificar': e.preventDefault(); irAClasificar(); break;
+      case 'lugar': ponerLugar(id, el.dataset.valor); break;
+      case 'regalo': alternarRegalo(id); break;
+      case 'sobra': marcarSobra(id); break;
+      case 'no-repetido': noEsRepetido(id); break;
+      case 'copiar-regalos': copiarRegalos(); break;
+      case 'anotar-regala': abrirHojaRegala(id); break;
+      case 'borrar-regala': guardarRegala(id, ''); break;
+      case 'sugerir-regala': {
+        const campoQuien = el.closest('form').querySelector('input[name="regala"]');
+        campoQuien.value = el.dataset.valor;
+        campoQuien.focus();
+        break;
+      }
       case 'ajustes': abrirAjustes(); break;
       case 'exportar': exportar(); break;
       case 'salir': salir(); break;
@@ -1497,6 +1863,7 @@
     } else if (tipo === 'item') guardarItem(f, e.submitter);
     else if (tipo === 'opcion') guardarOpcion(f);
     else if (tipo === 'conseguido') guardarConseguido(f);
+    else if (tipo === 'regala') guardarRegala(f.dataset.id, texto(new FormData(f).get('regala')));
     else if (tipo === 'ajustes') guardarAjustes(f);
   }
 
