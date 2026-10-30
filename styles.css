@@ -1277,6 +1277,144 @@ body.sin-sesion #toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); 
   cursor: pointer;
 }
 
+/* ───────────── Tabla ───────────── */
+
+body[data-vista="tabla"] #vista { max-width: 1040px; }
+
+.tabla-caja { overflow: hidden; border-radius: var(--radio); background: var(--superficie); }
+.tabla { margin: 0; padding: 0; list-style: none; }
+
+.tfila {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 42px;
+  grid-template-areas:
+    "check cosa regalo"
+    "lugar lugar lugar"
+    "panel panel panel";
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 4px;
+  padding: 8px 12px 10px 4px;
+  border-top: 1px solid var(--linea);
+}
+
+.tfila:first-child { border-top: 0; }
+.tfila > .check { grid-area: check; }
+.tfila > .tlugar { grid-area: lugar; margin: 2px 0 0 8px; }
+.tfila > .tlugar button { font-size: .82rem; }
+.tfila > .boton-regalo { grid-area: regalo; justify-self: end; }
+
+.tcosa { grid-area: cosa; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+
+.tnombre {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 4px 4px 4px 8px;
+  border: 0;
+  border-radius: var(--radio-chico);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tfila.hecha .fila-nombre { color: var(--tinta-suave); }
+
+.tflecha { display: inline-block; margin-left: 4px; }
+.tflecha svg { width: 14px; height: 14px; vertical-align: -2px; transition: transform .2s; }
+.tfila.abierta .tflecha svg { transform: rotate(180deg); }
+
+.tquien {
+  margin: 0 0 0 8px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--regalo);
+  font-size: .85rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.tpanel {
+  grid-area: panel;
+  min-width: 0;
+  margin: 8px 0 2px 8px;
+  padding: 14px 14px 8px;
+  border-radius: var(--radio);
+  background: var(--fondo);
+}
+
+.tpanel h3 { font-size: 1rem; font-weight: 800; }
+.tpanel .seccion-titulo { margin-bottom: 8px; }
+.tpanel .tarjetas { margin: 0; padding: 2px 0 10px; scroll-padding: 0; }
+.tpanel .tarjeta, .tpanel .tarjeta-nueva { flex-basis: min(86%, 300px); }
+.tpanel .notas { margin: 4px 0 0; color: var(--tinta-suave); font-size: .92rem; }
+.tpanel-acciones { display: flex; flex-wrap: wrap; gap: 4px; margin-left: -10px; }
+
+.tagregar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 10px 52px;
+  border-top: 1px solid var(--linea);
+}
+
+.tagregar input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1.5px dashed var(--linea);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tinta);
+  font: inherit;
+}
+
+.tagregar input:focus { outline: none; border-style: solid; border-color: var(--acento); box-shadow: 0 0 0 3px var(--acento-suave); }
+.tagregar .btn { flex: none; }
+
+.tencabezado { display: none; }
+
+@media (min-width: 720px) {
+  .tfila {
+    grid-template-columns: 84px minmax(0, 1fr) minmax(280px, 340px) 72px;
+    grid-template-areas:
+      "check cosa lugar regalo"
+      "panel panel panel panel";
+    padding: 6px 12px;
+  }
+
+  .tfila > .check, .tfila > .boton-regalo { justify-self: center; }
+  .tfila > .tlugar { margin: 0; }
+  .tpanel { margin-left: 0; }
+
+  .tencabezado {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr) minmax(280px, 340px) 72px;
+    column-gap: 6px;
+    margin-top: 12px;
+    padding: 10px 12px 6px;
+    background: var(--fondo);
+    color: var(--tinta-suave);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+
+  .tencabezado span:first-child, .tencabezado span:last-child { text-align: center; }
+  .tencabezado span:nth-child(2) { padding-left: 8px; }
+  .tagregar { padding-left: 110px; }
+  .solo-movil { display: none; }
+}
+
 /* ───────────── Movimiento reducido ───────────── */
 
 @media (prefers-reduced-motion: reduce) {

@@ -14,7 +14,7 @@
   const ORDEN_FILA = { pendiente: 0, comparando: 1, elegido: 2, conseguido: 3, no_necesario: 4 };
   const ORDEN_MANTITA = { conseguido: 0, elegido: 1, comparando: 2, pendiente: 3 };
   const ORDEN_PROXIMO = { pendiente: 0, comparando: 1, elegido: 2 };
-  const LS = { pin: 'bebe.pin', yo: 'bebe.yo', modo: 'bebe.lista.modo', filtro: 'bebe.lista.filtro', donde: 'bebe.lista.donde', colapsados: 'bebe.lista.colapsados' };
+  const LS = { pin: 'bebe.pin', yo: 'bebe.yo', modo: 'bebe.lista.modo', filtro: 'bebe.lista.filtro', donde: 'bebe.lista.donde', colapsados: 'bebe.lista.colapsados', tablaFiltro: 'bebe.tabla.filtro', tablaDonde: 'bebe.tabla.donde' };
   // [valor que se guarda en la planilla, nombre para mostrar, nombre corto para los botones]
   const LUGARES = [['Argentina', 'Argentina', 'Argentina'], ['EEUU online', 'EE.UU. online', 'EE.UU. online'], ['EEUU local', 'EE.UU. en local', 'EE.UU. local']];
   const FILTROS_DONDE = ['todo', 'Argentina', 'EEUU online', 'EEUU local', 'sin', 'regalos', 'repetidos'];
@@ -50,8 +50,12 @@
     error: '',
     busqueda: '',
     clasificando: false,
-    // Ítems tocados en modo clasificar: siguen a la vista aunque ya no pasen el filtro, hasta cambiar de filtro
-    tocados: {}
+    // Ítems tocados en modo clasificar o en la tabla: siguen a la vista aunque ya no pasen el filtro, hasta cambiar de filtro
+    tocados: {},
+    busquedaTabla: '',
+    abiertos: {},
+    focoRapido: '',
+    renderPendiente: false
   };
 
   let cacheOpciones = null;
@@ -530,29 +534,52 @@
 
     document.body.classList.remove('sin-sesion');
     const r = ruta();
+    document.body.dataset.vista = r.vista;
+    const activo = document.activeElement;
     const buscador = $('#buscador');
-    if (r.vista === 'lista' && buscador && document.activeElement === buscador) {
+    if (r.vista === 'lista' && buscador && activo === buscador) {
       actualizarContenidoLista();
       pintarSync();
       return;
     }
+    if (r.vista === 'tabla' && activo && activo.id === 'buscador-tabla') {
+      actualizarContenidoTabla();
+      pintarSync();
+      return;
+    }
+    // Mientras escriben en "Agregar en…" no se redibuja (se cerraría el teclado); se hace al salir del campo
+    if (r.vista === 'tabla' && activo && activo.hasAttribute && activo.hasAttribute('data-rapido') && !app.focoRapido) {
+      app.renderPendiente = true;
+      pintarSync();
+      return;
+    }
+    app.renderPendiente = false;
     const scrolls = guardarScrolls();
     const y = window.scrollY;
     let html;
     if (r.vista === 'lista') html = vistaLista();
     else if (r.vista === 'plata') html = vistaPlata();
     else if (r.vista === 'archivo') html = vistaArchivo();
+    else if (r.vista === 'tabla') html = vistaTabla();
     else if (r.vista === 'item') html = vistaItem(r.id);
     else html = vistaInicio();
     $('#vista').innerHTML = html;
     restaurarScrolls(scrolls);
     window.scrollTo(0, opciones && opciones.arriba ? 0 : y);
+    if (r.vista === 'tabla' && app.focoRapido) {
+      const foco = app.focoRapido;
+      app.focoRapido = '';
+      const campoRapido = Array.from(document.querySelectorAll('#vista form[data-form="rapido"]')).find(function (f) {
+        return (f.dataset.categoria || SIN_CATEGORIA) === foco;
+      });
+      if (campoRapido) campoRapido.querySelector('input').focus({ preventScroll: true });
+    }
     marcarTab(r.vista);
     pintarSync();
   }
 
   function marcarTab(vista) {
-    const activa = vista === 'item' ? 'lista' : (['lista', 'plata', 'archivo'].indexOf(vista) !== -1 ? vista : 'inicio');
+    const activa = vista === 'item' ? (app.previa === '#tabla' ? 'tabla' : 'lista') : (['lista', 'tabla', 'plata', 'archivo'].indexOf(vista) !== -1 ? vista : 'inicio');
     document.querySelectorAll('#tabs a').forEach(function (a) {
       if (a.dataset.vista === activa) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
@@ -562,6 +589,7 @@
   function alCambiarRuta() {
     const r = ruta();
     if (r.vista !== 'item') app.previa = '#' + r.vista;
+    app.tocados = {};
     cerrarHoja();
     render({ arriba: true });
   }
@@ -644,13 +672,22 @@
   }
 
   // Los tres lugares y el regalo. En la lista van compactos; en el detalle, con texto
-  function botonesCompra(it, conTexto) {
+  function botonesLugar(it, conTexto, clase) {
     const actual = lugarDe(it);
     const id = esc(it.id);
-    const regalo = si(it.posible_regalo);
-    const lugares = '<div class="lugares" role="group" aria-label="Dónde lo compramos">' + LUGARES.map(function (l) {
+    return '<div class="lugares' + (clase ? ' ' + clase : '') + '" role="group" aria-label="Dónde se compra: ' + esc(it.nombre) + '">' + LUGARES.map(function (l) {
       return '<button type="button" data-accion="lugar" data-id="' + id + '" data-valor="' + esc(l[0]) + '" aria-pressed="' + (l[0] === actual) + '">' + esc(conTexto ? l[1] : l[2]) + '</button>';
     }).join('') + '</div>';
+  }
+
+  function botonRegalo(it) {
+    return '<button class="boton-regalo" type="button" data-accion="regalo" data-id="' + esc(it.id) + '" aria-pressed="' + si(it.posible_regalo) + '" aria-label="Puede ser un regalo: ' + esc(it.nombre) + '" title="Puede ser un regalo">' + ICONOS.regalo + '</button>';
+  }
+
+  function botonesCompra(it, conTexto) {
+    const id = esc(it.id);
+    const regalo = si(it.posible_regalo);
+    const lugares = botonesLugar(it, conTexto);
     if (conTexto) {
       const quien = quienRegala(it);
       const lineaQuien = regalo && estadoItem(it) !== 'conseguido'
@@ -661,8 +698,7 @@
         : '';
       return lugares + '<button class="toggle" type="button" data-accion="regalo" data-id="' + id + '" aria-pressed="' + regalo + '">' + ICONOS.check + '<span>Puede ser un regalo</span></button>' + lineaQuien;
     }
-    return '<div class="clasif">' + lugares +
-      '<button class="boton-regalo" type="button" data-accion="regalo" data-id="' + id + '" aria-pressed="' + regalo + '" aria-label="Puede ser un regalo: ' + esc(it.nombre) + '" title="Puede ser un regalo">' + ICONOS.regalo + '</button></div>';
+    return '<div class="clasif">' + lugares + botonRegalo(it) + '</div>';
   }
 
   function segmentado(accion, opciones, actual) {
@@ -817,8 +853,7 @@
     return lugarDe(it) === donde;
   }
 
-  function conteosDonde() {
-    const filtro = filtroLista();
+  function conteosDonde(filtro) {
     const c = { todo: 0, sin: 0, regalos: 0, repetidos: 0 };
     LUGARES.forEach(function (l) { c[l[0]] = 0; });
     itemsActivos().forEach(function (it) {
@@ -831,12 +866,13 @@
     return c;
   }
 
-  function filtrosDonde(actual) {
-    const c = conteosDonde();
+  function filtrosDonde(actual, filtroEstado, accion) {
+    accion = accion || 'donde';
+    const c = conteosDonde(filtroEstado || filtroLista());
     const opciones = [['todo', 'Todos']].concat(LUGARES.map(function (l) { return [l[0], l[1]]; }), [['sin', 'Sin definir'], ['regalos', 'Para regalar'], ['repetidos', 'Repetidos']]);
-    return '<div class="filtros" role="group" aria-label="Qué mostrar" data-scroll-id="filtros-donde">' + opciones.map(function (o) {
+    return '<div class="filtros" role="group" aria-label="Qué mostrar" data-scroll-id="filtros-' + accion + '">' + opciones.map(function (o) {
       if (o[0] === 'repetidos' && !c.repetidos && actual !== 'repetidos') return '';
-      return '<button type="button" data-accion="donde" data-valor="' + esc(o[0]) + '" aria-pressed="' + (o[0] === actual) + '">' + esc(o[1]) + '<span class="n">' + c[o[0]] + '</span></button>';
+      return '<button type="button" data-accion="' + accion + '" data-valor="' + esc(o[0]) + '" aria-pressed="' + (o[0] === actual) + '">' + esc(o[1]) + '<span class="n">' + c[o[0]] + '</span></button>';
     }).join('') + '</div>';
   }
 
@@ -1041,7 +1077,197 @@
     render();
   }
 
+  /* ───────────── Tabla: todo en una pantalla, editable con botones ───────────── */
+
+  function filtroTabla() {
+    const v = leerLS(LS.tablaFiltro);
+    return ['falta', 'conseguidos', 'todo'].indexOf(v) !== -1 ? v : 'todo';
+  }
+
+  function dondeTabla() {
+    const v = leerLS(LS.tablaDonde);
+    return FILTROS_DONDE.indexOf(v) !== -1 ? v : 'todo';
+  }
+
+  function terminosTabla() { return sinAcentos(app.busquedaTabla).split(/\s+/).filter(Boolean); }
+
+  // Orden fijo (urgencia y nombre) para que las filas no salten de lugar al tocar los botones
+  function ordenarTabla(a, b) {
+    const na = sinAcentos(a.nombre).replace(/^[¿¡\s]+/, '');
+    const nb = sinAcentos(b.nombre).replace(/^[¿¡\s]+/, '');
+    return rankUrg(a) - rankUrg(b) || na.localeCompare(nb, 'es');
+  }
+
+  function gruposTabla() {
+    const filtro = filtroTabla();
+    const donde = dondeTabla();
+    const terminos = terminosTabla();
+    const pasa = terminos.length
+      ? function (it) { return coincide(it, terminos); }
+      : function (it) { return app.tocados[it.id] || (pasaEstado(it, filtro) && pasaDonde(it, donde)); };
+    return agrupar(itemsActivos(), 'categoria').map(function (par) {
+      return [par[0], par[1], juntarRepetidos(par[1].filter(pasa).sort(ordenarTabla))];
+    }).filter(function (g) { return g[2].length; });
+  }
+
+  function vistaTabla() {
+    return '<header class="cabecera"><h1>Tabla</h1></header>' +
+      '<div class="buscador" role="search">' + ICONOS.lupa +
+        '<input id="buscador-tabla" type="search" value="' + esc(app.busquedaTabla) + '" placeholder="Buscar en la tabla" aria-label="Buscar en la tabla" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">' +
+        '<button class="limpiar" type="button" data-accion="limpiar-busqueda-tabla" aria-label="Borrar búsqueda"' + (app.busquedaTabla ? '' : ' hidden') + '>' + ICONOS.cerrar + '</button>' +
+      '</div>' +
+      '<div id="tabla-contenido">' + contenidoTabla() + '</div>';
+  }
+
+  function contenidoTabla() {
+    const filtro = filtroTabla();
+    const donde = dondeTabla();
+    const buscando = terminosTabla().length > 0;
+    const grupos = gruposTabla();
+    const colapsados = leerColapsados('tabla');
+    const todosColapsados = grupos.length > 0 && grupos.every(function (g) { return colapsados.indexOf(g[0]) !== -1; });
+
+    let cuerpo = '';
+    grupos.forEach(function (g) {
+      const nombre = g[0];
+      const abierto = buscando || colapsados.indexOf(nombre) === -1;
+      const pc = progreso(g[1]);
+      const punto = '<i class="punto" style="--c:' + colorCat(nombre) + '"></i>';
+      const cabecera = buscando
+        ? '<span class="grupo-toggle estatico">' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span></span>'
+        : '<button class="grupo-toggle" type="button" data-accion="tabla-colapsar" data-grupo="' + esc(nombre) + '" aria-expanded="' + abierto + '">' +
+            '<span class="flecha">' + ICONOS.flecha + '</span>' + punto + '<span class="grupo-nombre">' + esc(nombre) + '</span>' +
+            '<span class="conteo">' + pc.tengo + ' de ' + pc.total + '</span></button>';
+      const agregar = buscando ? '' :
+        '<form class="tagregar" data-form="rapido" data-categoria="' + esc(nombre === SIN_CATEGORIA ? '' : nombre) + '" autocomplete="off">' +
+          '<input name="nombre" data-rapido maxlength="120" placeholder="Agregar en ' + esc(nombre) + '" aria-label="Agregar en ' + esc(nombre) + '" enterkeyhint="done">' +
+          '<button class="btn chico" type="submit">Agregar</button>' +
+        '</form>';
+      cuerpo += '<section class="grupo' + (abierto ? '' : ' colapsado') + '"><h2 class="grupo-cabecera">' + cabecera + '</h2>' +
+        (abierto ? '<div class="tabla-caja"><ul class="tabla">' + g[2].map(filaTabla).join('') + '</ul>' + agregar + '</div>' : '') +
+      '</section>';
+    });
+
+    if (buscando) {
+      const n = grupos.reduce(function (t, g) { return t + g[2].length; }, 0);
+      return '<p class="resultados">' + (n ? n + ' ' + plural(n, 'resultado', 'resultados') : 'No encontramos nada con “' + esc(app.busquedaTabla.trim()) + '”.') + '</p>' + cuerpo;
+    }
+    if (!cuerpo) cuerpo = '<p class="nota">No hay nada con estos filtros.</p>';
+
+    const contraer = grupos.length > 1
+      ? '<div class="lista-acciones"><button class="btn texto" type="button" data-accion="tabla-colapsar-todo">' + (todosColapsados ? 'Expandir todo' : 'Contraer todo') + '</button></div>'
+      : '';
+
+    return '<div class="controles">' +
+        segmentado('tabla-filtro', [['todo', 'Todo'], ['falta', 'Falta'], ['conseguidos', 'Conseguido']], filtro) +
+        filtrosDonde(donde, filtro, 'tabla-donde') +
+      '</div>' +
+      '<p class="nota explicacion solo-movil">El círculo marca lo que ya tenemos y el paquetito lo que puede ser regalo. Tocá el nombre para ver o cargar opciones.</p>' +
+      contraer +
+      '<div class="tencabezado" aria-hidden="true"><span>Lo tenemos</span><span>Qué</span><span>Dónde lo compramos</span><span>Regalo</span></div>' +
+      cuerpo;
+  }
+
+  function filaTabla(it) {
+    const hecha = estadoItem(it) === 'conseguido';
+    const abierta = !!app.abiertos[it.id];
+    const cant = parseInt(it.cantidad, 10) || 1;
+    const id = esc(it.id);
+    const quien = quienRegala(it);
+    return '<li class="tfila' + (hecha ? ' hecha' : '') + (abierta ? ' abierta' : '') + '">' +
+      '<button class="check" type="button" data-accion="alternar" data-id="' + id + '" aria-pressed="' + hecha + '" aria-label="' + (hecha ? 'Desmarcar que ya lo tenemos: ' : 'Ya lo tenemos: ') + esc(it.nombre) + '">' + ICONOS.check + '</button>' +
+      '<div class="tcosa">' +
+        '<button class="tnombre" type="button" data-accion="tabla-abrir" data-id="' + id + '" aria-expanded="' + abierta + '">' +
+          '<span class="fila-nombre">' + esc(it.nombre) + (cant > 1 ? ' <span class="cantidad">×' + cant + '</span>' : '') + (estaRepetido(it) ? ' <span class="marca-repetido">Repetido</span>' : '') + '</span>' +
+          '<span class="fila-meta">' + esc(textoEstado(it)) + '<span class="tflecha">' + ICONOS.flecha + '</span></span>' +
+        '</button>' +
+        (si(it.posible_regalo) && !hecha
+          ? '<button class="tquien" type="button" data-accion="anotar-regala" data-id="' + id + '">' + (quien ? 'Lo regala ' + esc(quien) : '¿Quién lo regala?') + '</button>'
+          : '') +
+      '</div>' +
+      botonesLugar(it, false, 'tlugar') +
+      botonRegalo(it) +
+      (abierta ? panelTabla(it) : '') +
+    '</li>';
+  }
+
+  // Lo que se abre al tocar el nombre: las opciones para comparar y cargar nuevas
+  function panelTabla(it) {
+    const id = esc(it.id);
+    const visibles = opcionesVisibles(it.id);
+    const nDesc = descartadasDe(it.id).length;
+    return '<div class="tpanel">' +
+      '<div class="seccion-titulo"><h3>Opciones</h3>' + (nDesc ? '<a href="#archivo">' + nDesc + ' ' + plural(nDesc, 'descartada', 'descartadas') + '</a>' : '') + '</div>' +
+      '<div class="tarjetas" data-scroll-id="tops-' + id + '">' +
+        visibles.map(function (o) { return tarjetaOpcion(o, visibles); }).join('') +
+        '<button class="tarjeta-nueva" type="button" data-accion="nueva-opcion" data-id="' + id + '">' + ICONOS.mas + '<span>Agregar opción</span></button>' +
+      '</div>' +
+      (it.notas ? '<p class="notas">' + esc(it.notas) + '</p>' : '') +
+      '<div class="tpanel-acciones">' +
+        '<a class="btn texto" href="#item/' + encodeURIComponent(it.id) + '">Ver ficha completa</a>' +
+        '<button class="btn texto" type="button" data-accion="editar-item" data-id="' + id + '">Editar</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function actualizarContenidoTabla() {
+    const contenedor = $('#tabla-contenido');
+    if (!contenedor) return;
+    const scrolls = guardarScrolls();
+    contenedor.innerHTML = contenidoTabla();
+    restaurarScrolls(scrolls);
+    const limpiar = $('.buscador .limpiar');
+    if (limpiar) limpiar.hidden = !app.busquedaTabla;
+  }
+
+  function alternarGrupoTabla(nombre) {
+    const colapsados = leerColapsados('tabla');
+    const i = colapsados.indexOf(nombre);
+    if (i === -1) colapsados.push(nombre); else colapsados.splice(i, 1);
+    guardarColapsados('tabla', colapsados);
+    render();
+  }
+
+  function alternarTodosTabla() {
+    const nombres = gruposTabla().map(function (g) { return g[0]; });
+    const colapsados = leerColapsados('tabla');
+    const todos = nombres.every(function (n) { return colapsados.indexOf(n) !== -1; });
+    guardarColapsados('tabla', todos ? [] : nombres);
+    render();
+  }
+
+  // Alta rápida al final de cada categoría: Enter agrega y deja el cursor listo para la siguiente
+  function agregarRapido(f) {
+    const campoNombre = f.querySelector('input[name="nombre"]');
+    const nombre = texto(campoNombre.value);
+    if (!nombre) return;
+    const donde = dondeTabla();
+    const fila = {
+      id: nuevoId(),
+      nombre: nombre,
+      categoria: f.dataset.categoria || '',
+      urgencia: app.ultimo.urgencia || URGENCIAS[0],
+      cantidad: '1',
+      comprar_en: LUGARES.some(function (l) { return l[0] === donde; }) ? donde : '',
+      posible_regalo: donde === 'regalos' ? 'sí' : ''
+    };
+    campoNombre.value = '';
+    app.tocados[fila.id] = true;
+    app.focoRapido = f.dataset.categoria || SIN_CATEGORIA;
+    cambiar([g('Items', fila)]);
+    toast('Agregamos “' + nombre + '”');
+  }
+
   /* ───────────── Detalle del ítem y comparador ───────────── */
+
+  // Las que no se descartaron: primero la elegida, después de la más barata a la más cara
+  function opcionesVisibles(itemId) {
+    return opcionesDe(itemId).filter(function (o) { return estadoOpcion(o) !== 'descartada'; }).sort(function (a, b) {
+      const ea = estadoOpcion(a) === 'elegida' ? 0 : 1;
+      const eb = estadoOpcion(b) === 'elegida' ? 0 : 1;
+      return ea - eb || (num(a.precio) || 1e12) - (num(b.precio) || 1e12);
+    });
+  }
 
   function vistaItem(id) {
     const volver = '<a class="volver" href="#lista" data-accion="volver">' + ICONOS.atras + 'Volver</a>';
@@ -1052,11 +1278,7 @@
     const cat = categoriaDe(it);
     const el = elegidaDe(it.id);
     const cant = parseInt(it.cantidad, 10) || 1;
-    const visibles = opcionesDe(it.id).filter(function (o) { return estadoOpcion(o) !== 'descartada'; }).sort(function (a, b) {
-      const ea = estadoOpcion(a) === 'elegida' ? 0 : 1;
-      const eb = estadoOpcion(b) === 'elegida' ? 0 : 1;
-      return ea - eb || (num(a.precio) || 1e12) - (num(b.precio) || 1e12);
-    });
+    const visibles = opcionesVisibles(it.id);
     const nDesc = descartadasDe(it.id).length;
 
     const datos = '<span class="dato"><i class="punto" style="--c:' + colorCat(cat) + '"></i>' + esc(cat) + '</span>' +
@@ -1579,6 +1801,7 @@
   function alternarConseguido(id) {
     const it = buscarItem(id);
     if (!it) return;
+    app.tocados[id] = true;
     if (estadoItem(it) === 'conseguido') { desmarcar(id); return; }
     const el = elegidaDe(id);
     const antes = copiaCampos(it, CAMPOS_CONSEGUIDO);
@@ -1643,14 +1866,14 @@
   function ponerLugar(id, valor) {
     const it = buscarItem(id);
     if (!it) return;
-    if (app.clasificando) app.tocados[id] = true;
+    app.tocados[id] = true;
     cambiar([g('Items', { id: id, comprar_en: lugarDe(it) === valor ? '' : valor })]);
   }
 
   function alternarRegalo(id) {
     const it = buscarItem(id);
     if (!it) return;
-    if (app.clasificando) app.tocados[id] = true;
+    app.tocados[id] = true;
     cambiar([g('Items', { id: id, posible_regalo: si(it.posible_regalo) ? '' : 'sí' })]);
   }
 
@@ -1826,6 +2049,21 @@
       case 'sobra': marcarSobra(id); break;
       case 'no-repetido': noEsRepetido(id); break;
       case 'copiar-regalos': copiarRegalos(); break;
+      case 'tabla-filtro': cambiarFiltro(LS.tablaFiltro, el.dataset.valor); break;
+      case 'tabla-donde': cambiarFiltro(LS.tablaDonde, el.dataset.valor); break;
+      case 'tabla-abrir':
+        if (app.abiertos[id]) delete app.abiertos[id]; else app.abiertos[id] = true;
+        render();
+        break;
+      case 'tabla-colapsar': alternarGrupoTabla(el.dataset.grupo); break;
+      case 'tabla-colapsar-todo': alternarTodosTabla(); break;
+      case 'limpiar-busqueda-tabla': {
+        app.busquedaTabla = '';
+        const campoBusqueda = $('#buscador-tabla');
+        if (campoBusqueda) { campoBusqueda.value = ''; campoBusqueda.focus(); }
+        actualizarContenidoTabla();
+        break;
+      }
       case 'anotar-regala': abrirHojaRegala(id); break;
       case 'borrar-regala': guardarRegala(id, ''); break;
       case 'sugerir-regala': {
@@ -1863,6 +2101,7 @@
     } else if (tipo === 'item') guardarItem(f, e.submitter);
     else if (tipo === 'opcion') guardarOpcion(f);
     else if (tipo === 'conseguido') guardarConseguido(f);
+    else if (tipo === 'rapido') agregarRapido(f);
     else if (tipo === 'regala') guardarRegala(f.dataset.id, texto(new FormData(f).get('regala')));
     else if (tipo === 'ajustes') guardarAjustes(f);
   }
@@ -1885,6 +2124,11 @@
       actualizarContenidoLista();
       return;
     }
+    if (t.id === 'buscador-tabla') {
+      app.busquedaTabla = t.value;
+      actualizarContenidoTabla();
+      return;
+    }
     if (t.name === 'categoria_nueva' && t.value) {
       t.closest('form').querySelectorAll('[name="categoria"]').forEach(function (r) { r.checked = false; });
     }
@@ -1897,7 +2141,13 @@
     document.addEventListener('input', alEscribir);
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') cerrarHoja();
-      if (e.key === 'Enter' && e.target.id === 'buscador') e.target.blur();
+      if (e.key === 'Enter' && (e.target.id === 'buscador' || e.target.id === 'buscador-tabla')) e.target.blur();
+    });
+    // Si llegaron datos nuevos mientras escribían en "Agregar en…", se dibujan al salir del campo
+    document.addEventListener('focusout', function (e) {
+      if (e.target.hasAttribute && e.target.hasAttribute('data-rapido') && app.renderPendiente) {
+        setTimeout(function () { if (app.renderPendiente) render(); }, 300);
+      }
     });
     window.addEventListener('hashchange', alCambiarRuta);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) refrescar(); });
@@ -1906,6 +2156,8 @@
       if (app.cola.length) { e.preventDefault(); e.returnValue = ''; }
     });
     setInterval(refrescar, INTERVALO_SYNC);
+    // Si la página abre directo en una vista (por ejemplo al recargar en la tabla), "Volver" vuelve ahí
+    if (ruta().vista !== 'item') app.previa = '#' + ruta().vista;
 
     if (!apiConfigurada()) renderSinConfig();
     else if (app.pin) cargarInicial();
